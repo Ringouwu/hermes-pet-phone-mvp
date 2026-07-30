@@ -1,0 +1,2 @@
+gatewayUrl=http://YOUR_TAILSCALE_SERVER_IP:8787
+gatewayToken=replace-with-the-private-token

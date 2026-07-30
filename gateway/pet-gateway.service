@@ -1,0 +1,15 @@
+[Unit]
+Description=Private Android Desk Pet Gateway
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/pet-gateway
+EnvironmentFile=%h/pet-gateway/.env
+Environment=PET_STT_MODEL=base
+ExecStart=%h/pet-gateway/venv/bin/python %h/pet-gateway/server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

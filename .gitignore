@@ -1,0 +1,15 @@
+.DS_Store
+
+# Android local configuration and generated output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/pet.properties
+android/.pet_token.tmp
+
+# Gateway secrets and Python cache
+gateway/.env
+gateway/venv/
+gateway/__pycache__/
+*.pyc

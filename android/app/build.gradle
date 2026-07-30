@@ -1,0 +1,20 @@
+plugins { id 'com.android.application' }
+
+def petProps = new Properties()
+def petPropsFile = rootProject.file('pet.properties')
+if (petPropsFile.exists()) { petPropsFile.withInputStream { petProps.load(it) } }
+
+android {
+    namespace 'com.yangshuo.petphone'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.yangshuo.petphone'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'GATEWAY_URL', '"' + petProps.getProperty('gatewayUrl', 'http://127.0.0.1:8787') + '"'
+        buildConfigField 'String', 'GATEWAY_TOKEN', '"' + petProps.getProperty('gatewayToken', '') + '"'
+    }
+    buildFeatures { buildConfig true }
+}
