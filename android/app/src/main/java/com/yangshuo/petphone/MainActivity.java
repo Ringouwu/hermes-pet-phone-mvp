@@ -90,7 +90,7 @@ public class MainActivity extends Activity {
         box.setPadding(dp(20), dp(14), dp(20), dp(18));
         box.setBackgroundColor(0xff15110d);
 
-        status = text("猫鸡·在线", 18, 0xffd7b785);
+        status = text("猫鸡·在线", 21, 0xffd7b785);
         status.setPadding(0, 0, 0, dp(8));
         box.addView(status, new LinearLayout.LayoutParams(-1, dp(40)));
 
@@ -100,10 +100,10 @@ public class MainActivity extends Activity {
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setGravity(Gravity.CENTER_VERTICAL);
-        TextView nowLabel = text("现在", 13, 0xffa69886);
-        clock = text("--:--", 40, 0xfff5eee3);
-        calendar = text("加载日期…", 15, 0xffd7b785);
-        TextView hint = text("按住说话\n松开就发送", 13, 0xffa69886);
+        TextView nowLabel = text("现在", 15, 0xffa69886);
+        clock = text("--:--", 46, 0xfff5eee3);
+        calendar = text("加载日期…", 17, 0xffd7b785);
+        TextView hint = text("按住说话\n松开就发送", 15, 0xffa69886);
         hint.setPadding(0, dp(18), 0, 0);
         info.addView(nowLabel);
         info.addView(clock);
@@ -115,20 +115,20 @@ public class MainActivity extends Activity {
         dashboard.addView(pet, new LinearLayout.LayoutParams(0, -1, 1.22f));
         box.addView(dashboard, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        TextView replyLabel = text("猫鸡说", 14, 0xffd7b785);
+        TextView replyLabel = text("猫鸡说", 16, 0xffd7b785);
         replyLabel.setPadding(0, dp(6), 0, 0);
         box.addView(replyLabel, new LinearLayout.LayoutParams(-1, dp(32)));
         ScrollView replyScroll = new ScrollView(this);
-        answer = text("按住下方按钮，说一句话。", 18, 0xfff5eee3);
+        answer = text("按住下方按钮，说一句话。", 22, 0xfff5eee3);
         answer.setGravity(Gravity.TOP | Gravity.START);
         answer.setLineSpacing(dp(4), 1.05f);
         answer.setPadding(dp(2), dp(6), dp(2), dp(6));
         replyScroll.addView(answer, new ScrollView.LayoutParams(-1, -2));
         box.addView(replyScroll, new LinearLayout.LayoutParams(-1, dp(180)));
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL); actions.setPadding(0, dp(12), 0, 0);
-        talk = new Button(this); talk.setText("按住说话"); talk.setTextSize(21); talk.setAllCaps(false);
+        talk = new Button(this); talk.setText("按住说话"); talk.setTextSize(23); talk.setAllCaps(false);
         actions.addView(talk, new LinearLayout.LayoutParams(0, dp(76), 1f));
-        mute = new Button(this); mute.setText("🔊"); mute.setTextSize(22); mute.setAllCaps(false);
+        mute = new Button(this); mute.setText("🔊"); mute.setTextSize(24); mute.setAllCaps(false);
         LinearLayout.LayoutParams muteParams = new LinearLayout.LayoutParams(dp(76), dp(76));
         muteParams.leftMargin = dp(10); actions.addView(mute, muteParams);
         box.addView(actions);
