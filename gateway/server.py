@@ -21,7 +21,7 @@ HERMES = os.environ.get(
 SESSION = os.environ.get("PET_HERMES_SESSION", "pet-desk-01")
 HOST = os.environ.get("PET_GATEWAY_HOST", "127.0.0.1")
 STT_MODEL = os.environ.get("PET_STT_MODEL", "base")
-MAX_SCREEN_CHARS = 56
+MAX_SCREEN_CHARS = 180
 LOCK = threading.Lock()
 MODEL = None
 

@@ -14,6 +14,7 @@ import android.view.View;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONObject;
@@ -26,6 +27,8 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -38,10 +41,20 @@ public class MainActivity extends Activity {
     private MediaRecorder recorder;
     private File audioFile;
     private boolean recording = false;
+    private TextView clock, calendar;
+    private final Runnable clockTicker = new Runnable() {
+        @Override public void run() {
+            Date now = new Date();
+            if (clock != null) clock.setText(new SimpleDateFormat("HH:mm", Locale.CHINA).format(now));
+            if (calendar != null) calendar.setText(new SimpleDateFormat("M月d日  EEEE", Locale.CHINA).format(now));
+            main.postDelayed(this, 1000);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         setContentView(makeUi());
+        clockTicker.run();
         tts = new TextToSpeech(this, code -> main.post(() -> { if (tts != null) tts.setLanguage(Locale.SIMPLIFIED_CHINESE); }));
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_PERMISSION);
@@ -51,17 +64,43 @@ public class MainActivity extends Activity {
     private View makeUi() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(20), dp(18), dp(20), dp(20));
+        box.setPadding(dp(20), dp(14), dp(20), dp(18));
         box.setBackgroundColor(0xff15110d);
 
-        status = text("小胡子 · 在线", 17, 0xffd7b785);
-        box.addView(status);
+        status = text("猫鸡·在线", 18, 0xffd7b785);
+        status.setPadding(0, 0, 0, dp(8));
+        box.addView(status, new LinearLayout.LayoutParams(-1, dp(40)));
+
+        LinearLayout dashboard = new LinearLayout(this);
+        dashboard.setOrientation(LinearLayout.HORIZONTAL);
+        dashboard.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.setGravity(Gravity.CENTER_VERTICAL);
+        TextView nowLabel = text("现在", 13, 0xffa69886);
+        clock = text("--:--", 40, 0xfff5eee3);
+        calendar = text("加载日期…", 15, 0xffd7b785);
+        TextView hint = text("按住说话\n松开就发送", 13, 0xffa69886);
+        hint.setPadding(0, dp(18), 0, 0);
+        info.addView(nowLabel);
+        info.addView(clock);
+        info.addView(calendar);
+        info.addView(hint);
+        dashboard.addView(info, new LinearLayout.LayoutParams(0, -1, 0.78f));
         GifView pet = new GifView(this, com.yangshuo.petphone.R.raw.idle);
-        box.addView(pet, new LinearLayout.LayoutParams(-1, 0, 1f));
-        answer = text("按住下方按钮，说一句话。", 24, 0xfff5eee3);
-        answer.setMinLines(3); answer.setMaxLines(4);
-        LinearLayout.LayoutParams answerParams = new LinearLayout.LayoutParams(-1, dp(116));
-        answerParams.topMargin = dp(8); box.addView(answer, answerParams);
+        dashboard.addView(pet, new LinearLayout.LayoutParams(0, -1, 1.22f));
+        box.addView(dashboard, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        TextView replyLabel = text("猫鸡说", 14, 0xffd7b785);
+        replyLabel.setPadding(0, dp(6), 0, 0);
+        box.addView(replyLabel, new LinearLayout.LayoutParams(-1, dp(32)));
+        ScrollView replyScroll = new ScrollView(this);
+        answer = text("按住下方按钮，说一句话。", 18, 0xfff5eee3);
+        answer.setGravity(Gravity.TOP | Gravity.START);
+        answer.setLineSpacing(dp(4), 1.05f);
+        answer.setPadding(dp(2), dp(6), dp(2), dp(6));
+        replyScroll.addView(answer, new ScrollView.LayoutParams(-1, -2));
+        box.addView(replyScroll, new LinearLayout.LayoutParams(-1, dp(180)));
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL); actions.setPadding(0, dp(12), 0, 0);
         talk = new Button(this); talk.setText("按住说话"); talk.setTextSize(21); talk.setAllCaps(false);
         actions.addView(talk, new LinearLayout.LayoutParams(0, dp(76), 1f));
@@ -111,7 +150,7 @@ public class MainActivity extends Activity {
     private void releaseRecorder() { if (recorder != null) { recorder.reset(); recorder.release(); recorder = null; } }
 
     private void send(String words) {
-        status.setText("小胡子在思考…"); answer.setText(words);
+        status.setText("猫鸡在思考…"); answer.setText(words);
         new Thread(() -> {
             try {
                 URL url = new URL(BuildConfig.GATEWAY_URL + "/v1/chat");
@@ -130,7 +169,7 @@ public class MainActivity extends Activity {
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "请求失败"));
                 JSONObject result = new JSONObject(raw.toString());
                 String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { answer.setText(screen); status.setText("小胡子 · 在线"); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
             } catch (Exception e) {
                 main.post(() -> { answer.setText("连接失败：" + e.getMessage()); status.setText("请检查 Tailscale 和 Gateway"); });
             }
@@ -151,11 +190,11 @@ public class MainActivity extends Activity {
                 StringBuilder raw = new StringBuilder(); String line; while ((line = in.readLine()) != null) raw.append(line);
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "识别失败"));
                 JSONObject result = new JSONObject(raw.toString()); String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { answer.setText(screen); status.setText("小胡子 · 在线"); talk.setEnabled(true); talk.setText("按住说话"); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); talk.setEnabled(true); talk.setText("按住说话"); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
             } catch (Exception e) { main.post(() -> { answer.setText("语音请求失败：" + e.getMessage()); status.setText("请再试一次"); talk.setEnabled(true); talk.setText("按住说话"); }); }
             finally { if (file != null) file.delete(); }
         }).start();
     }
     @Override public void onRequestPermissionsResult(int r, String[] p, int[] g) { super.onRequestPermissionsResult(r,p,g); }
-    @Override protected void onDestroy() { releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() { main.removeCallbacks(clockTicker); releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
 }
