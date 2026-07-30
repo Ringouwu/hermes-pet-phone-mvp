@@ -30,18 +30,26 @@ import java.util.ArrayList;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Random;
 
 public class MainActivity extends Activity {
     private static final int RECORD_PERMISSION = 7;
+    private enum PetState { IDLE, LISTENING, THINKING, ANSWERING, ERROR }
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Random random = new Random();
     private TextView status, answer;
     private Button talk, mute;
+    private GifView pet;
     private TextToSpeech tts;
     private boolean muted = false;
     private MediaRecorder recorder;
     private File audioFile;
     private boolean recording = false;
     private TextView clock, calendar;
+    private PetState petState = PetState.IDLE;
+    private int currentGif = 0;
+    private final int[] idleGifs = {R.raw.idle, R.raw.idle, R.raw.jumping, R.raw.running_left, R.raw.running_right};
+    private final int[] thinkingGifs = {R.raw.waiting, R.raw.review, R.raw.running};
     private final Runnable clockTicker = new Runnable() {
         @Override public void run() {
             Date now = new Date();
@@ -50,11 +58,26 @@ public class MainActivity extends Activity {
             main.postDelayed(this, 1000);
         }
     };
+    private final Runnable idleTicker = new Runnable() {
+        @Override public void run() {
+            if (petState != PetState.IDLE) return;
+            showDifferentGif(idleGifs);
+            main.postDelayed(this, randomBetween(5000, 10000));
+        }
+    };
+    private final Runnable thinkingTicker = new Runnable() {
+        @Override public void run() {
+            if (petState != PetState.THINKING) return;
+            showDifferentGif(thinkingGifs);
+            main.postDelayed(this, randomBetween(3000, 5000));
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         setContentView(makeUi());
         clockTicker.run();
+        setPetState(PetState.IDLE);
         tts = new TextToSpeech(this, code -> main.post(() -> { if (tts != null) tts.setLanguage(Locale.SIMPLIFIED_CHINESE); }));
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_PERMISSION);
@@ -87,7 +110,8 @@ public class MainActivity extends Activity {
         info.addView(calendar);
         info.addView(hint);
         dashboard.addView(info, new LinearLayout.LayoutParams(0, -1, 0.78f));
-        GifView pet = new GifView(this, com.yangshuo.petphone.R.raw.idle);
+        pet = new GifView(this, R.raw.idle);
+        pet.setOnClickListener(v -> reactToPetTap());
         dashboard.addView(pet, new LinearLayout.LayoutParams(0, -1, 1.22f));
         box.addView(dashboard, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -123,6 +147,62 @@ public class MainActivity extends Activity {
     }
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
+    private int randomBetween(int low, int high) { return low + random.nextInt(high - low + 1); }
+
+    private void showGif(int gif) {
+        if (pet != null) { currentGif = gif; pet.setGif(gif); }
+    }
+
+    private void showDifferentGif(int[] options) {
+        int next = currentGif;
+        for (int i = 0; i < 6 && next == currentGif; i++) next = options[random.nextInt(options.length)];
+        showGif(next);
+    }
+
+    private void clearPetTimers() {
+        main.removeCallbacks(idleTicker);
+        main.removeCallbacks(thinkingTicker);
+    }
+
+    private void setPetState(PetState next) {
+        clearPetTimers();
+        petState = next;
+        if (next == PetState.IDLE) {
+            showGif(R.raw.idle);
+            main.postDelayed(idleTicker, randomBetween(5000, 10000));
+        } else if (next == PetState.LISTENING) {
+            showGif(R.raw.review);
+        } else if (next == PetState.THINKING) {
+            showGif(R.raw.waiting);
+            main.postDelayed(thinkingTicker, randomBetween(3000, 5000));
+        } else if (next == PetState.ANSWERING) {
+            showGif(R.raw.jumping);
+            main.postDelayed(() -> { if (petState == PetState.ANSWERING) showGif(R.raw.waving); }, 900);
+            main.postDelayed(() -> { if (petState == PetState.ANSWERING) setPetState(PetState.IDLE); }, 2900);
+        } else {
+            showGif(R.raw.failed);
+            main.postDelayed(() -> { if (petState == PetState.ERROR) setPetState(PetState.IDLE); }, 2200);
+        }
+    }
+
+    private void reactToPetTap() {
+        if (petState == PetState.LISTENING) return;
+        if (petState == PetState.THINKING) {
+            clearPetTimers();
+            showGif(R.raw.waving);
+            main.postDelayed(() -> {
+                if (petState == PetState.THINKING) {
+                    showDifferentGif(thinkingGifs);
+                    main.postDelayed(thinkingTicker, randomBetween(3000, 5000));
+                }
+            }, 800);
+            return;
+        }
+        if (petState == PetState.ERROR) { showGif(R.raw.failed); return; }
+        clearPetTimers();
+        showGif(random.nextBoolean() ? R.raw.waving : R.raw.jumping);
+        main.postDelayed(() -> { if (petState == PetState.IDLE) setPetState(PetState.IDLE); }, 1400);
+    }
 
     private void startRecording() {
         if (recording) return;
@@ -138,19 +218,19 @@ public class MainActivity extends Activity {
             recorder.setAudioEncodingBitRate(64000); recorder.setAudioSamplingRate(16000);
             recorder.setOutputFile(audioFile.getAbsolutePath());
             recorder.prepare(); recorder.start();
-            recording = true; talk.setText("松开发送"); status.setText("正在录音…"); answer.setText("我在听。");
-        } catch (Exception e) { status.setText("无法启动录音：" + e.getMessage()); releaseRecorder(); }
+            recording = true; talk.setText("松开发送"); status.setText("正在录音…"); answer.setText("我在听。"); setPetState(PetState.LISTENING);
+        } catch (Exception e) { status.setText("无法启动录音：" + e.getMessage()); releaseRecorder(); setPetState(PetState.ERROR); }
     }
     private void stopRecording() {
         if (!recording) return;
-        recording = false; talk.setText("发送中…"); talk.setEnabled(false); status.setText("正在上传并识别语音…");
+        recording = false; talk.setText("发送中…"); talk.setEnabled(false); status.setText("正在上传并识别语音…"); setPetState(PetState.THINKING);
         try { recorder.stop(); releaseRecorder(); sendAudio(audioFile); }
-        catch (RuntimeException e) { releaseRecorder(); talk.setEnabled(true); talk.setText("按住说话"); status.setText("录音太短，请按住至少一秒"); }
+        catch (RuntimeException e) { releaseRecorder(); talk.setEnabled(true); talk.setText("按住说话"); status.setText("录音太短，请按住至少一秒"); setPetState(PetState.ERROR); }
     }
     private void releaseRecorder() { if (recorder != null) { recorder.reset(); recorder.release(); recorder = null; } }
 
     private void send(String words) {
-        status.setText("猫鸡在思考…"); answer.setText(words);
+        status.setText("猫鸡在思考…"); answer.setText(words); setPetState(PetState.THINKING);
         new Thread(() -> {
             try {
                 URL url = new URL(BuildConfig.GATEWAY_URL + "/v1/chat");
@@ -169,9 +249,9 @@ public class MainActivity extends Activity {
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "请求失败"));
                 JSONObject result = new JSONObject(raw.toString());
                 String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
             } catch (Exception e) {
-                main.post(() -> { answer.setText("连接失败：" + e.getMessage()); status.setText("请检查 Tailscale 和 Gateway"); });
+                main.post(() -> { answer.setText("连接失败：" + e.getMessage()); status.setText("请检查 Tailscale 和 Gateway"); setPetState(PetState.ERROR); });
             }
         }).start();
     }
@@ -190,11 +270,11 @@ public class MainActivity extends Activity {
                 StringBuilder raw = new StringBuilder(); String line; while ((line = in.readLine()) != null) raw.append(line);
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "识别失败"));
                 JSONObject result = new JSONObject(raw.toString()); String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); talk.setEnabled(true); talk.setText("按住说话"); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
-            } catch (Exception e) { main.post(() -> { answer.setText("语音请求失败：" + e.getMessage()); status.setText("请再试一次"); talk.setEnabled(true); talk.setText("按住说话"); }); }
+                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); talk.setEnabled(true); talk.setText("按住说话"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+            } catch (Exception e) { main.post(() -> { answer.setText("语音请求失败：" + e.getMessage()); status.setText("请再试一次"); talk.setEnabled(true); talk.setText("按住说话"); setPetState(PetState.ERROR); }); }
             finally { if (file != null) file.delete(); }
         }).start();
     }
     @Override public void onRequestPermissionsResult(int r, String[] p, int[] g) { super.onRequestPermissionsResult(r,p,g); }
-    @Override protected void onDestroy() { main.removeCallbacks(clockTicker); releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() { main.removeCallbacks(clockTicker); clearPetTimers(); releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
 }

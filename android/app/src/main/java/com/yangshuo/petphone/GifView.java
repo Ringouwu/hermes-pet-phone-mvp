@@ -7,9 +7,14 @@ import android.os.SystemClock;
 import android.view.View;
 
 public class GifView extends View {
-    private final Movie movie;
-    private final long started = SystemClock.uptimeMillis();
-    public GifView(Context context, int id) { super(context); movie = Movie.decodeStream(getResources().openRawResource(id)); }
+    private Movie movie;
+    private long started = SystemClock.uptimeMillis();
+    public GifView(Context context, int id) { super(context); setGif(id); }
+    public void setGif(int id) {
+        movie = Movie.decodeStream(getResources().openRawResource(id));
+        started = SystemClock.uptimeMillis();
+        invalidate();
+    }
     @Override protected void onDraw(Canvas c) {
         super.onDraw(c); if (movie == null) return;
         int duration = movie.duration() == 0 ? 1000 : movie.duration();
