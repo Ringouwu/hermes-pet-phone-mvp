@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
 import android.media.MediaRecorder;
@@ -70,9 +71,9 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        // zpix does not contain the full Chinese glyph set on Android; use the system mono fallback
-        // so dynamic Hermes replies always remain readable.
-        pixelTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL);
+        // The 12px Chinese edition contains the full common Chinese glyph set.
+        // The 16px subset does not include characters such as 猫 or 鸡.
+        pixelTypeface = getResources().getFont(R.font.ark_pixel_12_zh_cn);
         setContentView(makeUi());
         setPetState(PetState.IDLE);
         tts = new TextToSpeech(this, code -> main.post(() -> { if (tts != null) tts.setLanguage(Locale.SIMPLIFIED_CHINESE); }));
@@ -100,7 +101,7 @@ public class MainActivity extends Activity {
         dotShape.setShape(GradientDrawable.OVAL);
         dotShape.setColor(0xff4ee46c);
         dot.setBackground(dotShape);
-        status = text("🐱  猫鸡·在线", 20, 0xffffc46b);
+        status = text("🐱  猫鸡·在线", 18, 0xffffc46b);
         status.setPadding(0, 0, 0, dp(8));
         LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(9), dp(9));
         dotParams.rightMargin = dp(10);
@@ -114,14 +115,17 @@ public class MainActivity extends Activity {
         welcomeBubble = new ImageView(this);
         welcomeBubble.setImageResource(R.drawable.skin_bubble_reference_initial);
         welcomeBubble.setScaleType(ImageView.ScaleType.FIT_XY);
+        // The reference image contains baked-in text, so it stays hidden: every
+        // visible sentence must be rendered by Android with Ark Pixel instead.
+        welcomeBubble.setVisibility(View.GONE);
         bubbleStage.addView(welcomeBubble, new FrameLayout.LayoutParams(-1, -1));
 
         liveBubble = new FrameLayout(this);
         liveBubble.setBackgroundResource(R.drawable.skin_bubble_final_reference);
-        liveBubble.setVisibility(View.INVISIBLE);
+        liveBubble.setVisibility(View.VISIBLE);
         ScrollView replyScroll = new ScrollView(this);
         replyScroll.setVerticalScrollBarEnabled(false);
-        answer = text("喵～我在呢。\n有什么想聊的、想问的，\n或者需要我陪你一下吗？", 20, 0xffffe6cf);
+        answer = text("喵～我在呢。\n有什么想聊的、想问的，\n或者需要我陪你一下吗？", 18, 0xffffe6cf);
         answer.setGravity(Gravity.TOP | Gravity.START);
         answer.setLineSpacing(dp(9), 1.0f);
         answer.setPadding(0, 0, 0, 0);
@@ -141,11 +145,11 @@ public class MainActivity extends Activity {
         box.addView(pet, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL); actions.setPadding(0, dp(12), 0, 0);
-        talk = new Button(this); talk.setText("按住命令猫鸡"); talk.setTextSize(22); talk.setAllCaps(false);
-        talk.setTextColor(0xffffca70); talk.setTypeface(pixelTypeface); talk.setBackgroundResource(R.drawable.skin_main_button);
+        talk = new Button(this); talk.setText("按住命令猫鸡"); talk.setTextSize(23); talk.setAllCaps(false);
+        talk.setTextColor(0xffffca70); applyPixelTypeface(talk); talk.setBackgroundResource(R.drawable.skin_main_button);
         actions.addView(talk, new LinearLayout.LayoutParams(0, dp(76), 1f));
         mute = new Button(this); mute.setText("🔊"); mute.setTextSize(24); mute.setAllCaps(false);
-        mute.setText(""); mute.setGravity(Gravity.CENTER); mute.setTextColor(0xffffca70); mute.setTypeface(pixelTypeface); mute.setBackgroundResource(R.drawable.skin_mute_button);
+        mute.setText(""); mute.setGravity(Gravity.CENTER); mute.setTextColor(0xffffca70); applyPixelTypeface(mute); mute.setBackgroundResource(R.drawable.skin_mute_button);
         Drawable speaker = getDrawable(R.drawable.skin_speaker);
         speaker.setBounds(0, 0, dp(42), dp(42));
         mute.setCompoundDrawables(null, speaker, null, null);
@@ -163,8 +167,14 @@ public class MainActivity extends Activity {
 
     private TextView text(String value, int size, int color) {
         TextView view = new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(color);
-        if (pixelTypeface != null) view.setTypeface(pixelTypeface);
+        applyPixelTypeface(view);
         view.setPadding(0, 8, 0, 8); return view;
+    }
+
+    private void applyPixelTypeface(TextView view) {
+        if (pixelTypeface != null) view.setTypeface(pixelTypeface);
+        view.setPaintFlags(view.getPaintFlags() & ~Paint.ANTI_ALIAS_FLAG);
+        view.setIncludeFontPadding(false);
     }
 
     private void showReply(String value) {
