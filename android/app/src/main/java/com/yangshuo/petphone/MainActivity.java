@@ -7,11 +7,11 @@ import android.graphics.Typeface;
 import android.graphics.Paint;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
+import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.speech.tts.TextToSpeech;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.Gravity;
@@ -28,10 +28,11 @@ import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.Locale;
 import java.util.Random;
 
 public class MainActivity extends Activity {
@@ -43,10 +44,13 @@ public class MainActivity extends Activity {
     private TextView status, answer;
     private FrameLayout liveBubble;
     private ImageView welcomeBubble;
-    private Button talk, mute;
+    private Button talk, mute, music;
     private GifView pet;
-    private TextToSpeech tts;
-    private boolean muted = false;
+    private MediaPlayer player;
+    private boolean voiceEnabled = false;
+    private MediaPlayer bgmPlayer;
+    private boolean bgmEnabled = false;
+    private int bgmPositionMs = 0;
     private MediaRecorder recorder;
     private File audioFile;
     private boolean recording = false;
@@ -76,7 +80,6 @@ public class MainActivity extends Activity {
         pixelTypeface = getResources().getFont(R.font.ark_pixel_12_zh_cn);
         setContentView(makeUi());
         setPetState(PetState.IDLE);
-        tts = new TextToSpeech(this, code -> main.post(() -> { if (tts != null) tts.setLanguage(Locale.SIMPLIFIED_CHINESE); }));
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_PERMISSION);
         }
@@ -147,21 +150,39 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL); actions.setPadding(0, dp(12), 0, 0);
         talk = new Button(this); talk.setText("按住命令貓雞"); talk.setTextSize(23); talk.setAllCaps(false);
         talk.setTextColor(0xffffca70); applyPixelTypeface(talk); talk.setBackgroundResource(R.drawable.skin_main_button);
-        actions.addView(talk, new LinearLayout.LayoutParams(0, dp(76), 1f));
+        actions.addView(talk, new LinearLayout.LayoutParams(0, dp(104), 1f));
+
+        LinearLayout soundControls = new LinearLayout(this); soundControls.setOrientation(LinearLayout.VERTICAL); soundControls.setGravity(Gravity.CENTER_HORIZONTAL);
+        music = new Button(this); music.setText("♫"); music.setTextSize(18); music.setAllCaps(false); music.setGravity(Gravity.CENTER);
+        applyPixelTypeface(music); music.setBackgroundResource(R.drawable.skin_mute_button);
+        soundControls.addView(music, new LinearLayout.LayoutParams(dp(58), dp(34)));
         mute = new Button(this); mute.setText("🔊"); mute.setTextSize(24); mute.setAllCaps(false);
         mute.setText(""); mute.setGravity(Gravity.CENTER); mute.setTextColor(0xffffca70); applyPixelTypeface(mute); mute.setBackgroundResource(R.drawable.skin_mute_button);
         Drawable speaker = getDrawable(R.drawable.skin_speaker);
         speaker.setBounds(0, 0, dp(42), dp(42));
         mute.setCompoundDrawables(null, speaker, null, null);
-        LinearLayout.LayoutParams muteParams = new LinearLayout.LayoutParams(dp(76), dp(76));
-        muteParams.leftMargin = dp(10); actions.addView(mute, muteParams);
+        LinearLayout.LayoutParams muteParams = new LinearLayout.LayoutParams(dp(70), dp(64));
+        muteParams.topMargin = dp(6); soundControls.addView(mute, muteParams);
+        LinearLayout.LayoutParams soundParams = new LinearLayout.LayoutParams(dp(76), dp(104));
+        soundParams.leftMargin = dp(10); actions.addView(soundControls, soundParams);
         box.addView(actions);
         talk.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) startRecording();
             if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) stopRecording();
             return true;
         });
-        mute.setOnClickListener(v -> { muted = !muted; mute.setText(muted ? "🔇" : "🔊"); if (muted) tts.stop(); });
+        updateVoiceButton();
+        mute.setOnClickListener(v -> {
+            voiceEnabled = !voiceEnabled;
+            if (!voiceEnabled) stopVoice();
+            updateVoiceButton();
+        });
+        updateMusicButton();
+        music.setOnClickListener(v -> {
+            bgmEnabled = !bgmEnabled;
+            if (bgmEnabled) startBgm(); else pauseBgm();
+            updateMusicButton();
+        });
         return root;
     }
 
@@ -181,6 +202,108 @@ public class MainActivity extends Activity {
         if (welcomeBubble != null) welcomeBubble.setVisibility(View.GONE);
         if (liveBubble != null) liveBubble.setVisibility(View.VISIBLE);
         answer.setText(value);
+    }
+
+    private void updateVoiceButton() {
+        Drawable icon = getDrawable(R.drawable.skin_speaker).mutate();
+        icon.setBounds(0, 0, dp(42), dp(42));
+        icon.setTint(voiceEnabled ? 0xff62ff9c : 0xff806c45);
+        mute.setCompoundDrawables(null, icon, null, null);
+        mute.setAlpha(voiceEnabled ? 1f : .72f);
+        mute.setContentDescription(voiceEnabled ? "語音已開啟" : "語音已關閉");
+    }
+
+    private void updateMusicButton() {
+        music.setTextColor(bgmEnabled ? 0xff62ff9c : 0xff806c45);
+        music.setAlpha(bgmEnabled ? 1f : .72f);
+        music.setContentDescription(bgmEnabled ? "背景音樂已開啟" : "背景音樂已關閉");
+    }
+
+    private void startBgm() {
+        if (bgmPlayer != null) {
+            try {
+                bgmPlayer.seekTo(bgmPositionMs);
+                bgmPlayer.start();
+                return;
+            } catch (IllegalStateException ignored) { releaseBgm(); }
+        }
+        bgmPlayer = MediaPlayer.create(this, R.raw.chiptune_bgm);
+        if (bgmPlayer == null) { bgmEnabled = false; return; }
+        bgmPlayer.setLooping(true);
+        bgmPlayer.setVolume(.28f, .28f);
+        bgmPlayer.setOnErrorListener((item, what, extra) -> { releaseBgm(); bgmEnabled = false; main.post(this::updateMusicButton); return true; });
+        if (bgmPositionMs > 0) bgmPlayer.seekTo(bgmPositionMs);
+        bgmPlayer.start();
+    }
+
+    private void pauseBgm() {
+        if (bgmPlayer == null) return;
+        try {
+            if (bgmPlayer.isPlaying()) {
+                bgmPositionMs = bgmPlayer.getCurrentPosition();
+                bgmPlayer.pause();
+            }
+        } catch (IllegalStateException ignored) { releaseBgm(); }
+    }
+
+    private void releaseBgm() {
+        if (bgmPlayer == null) return;
+        try { if (bgmPlayer.isPlaying()) bgmPlayer.stop(); } catch (IllegalStateException ignored) { }
+        bgmPlayer.release(); bgmPlayer = null;
+        bgmPositionMs = 0;
+    }
+
+    private void handleReply(String screen, String speech) {
+        showReply(screen);
+        status.setText("貓雞·在線");
+        setPetState(PetState.ANSWERING);
+        if (voiceEnabled) requestSpeech(speech);
+    }
+
+    private void requestSpeech(String words) {
+        new Thread(() -> {
+            File output = new File(getCacheDir(), "maoji-reply.mp3");
+            try {
+                URL url = new URL(BuildConfig.GATEWAY_URL + "/v1/tts");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST"); conn.setConnectTimeout(12000); conn.setReadTimeout(90000);
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                conn.setRequestProperty("Authorization", "Bearer " + BuildConfig.GATEWAY_TOKEN);
+                conn.setDoOutput(true);
+                try (DataOutputStream out = new DataOutputStream(conn.getOutputStream())) {
+                    out.write(new JSONObject().put("text", words).toString().getBytes("UTF-8"));
+                }
+                int response = conn.getResponseCode();
+                if (response >= 400) throw new Exception("語音服務暫時不可用");
+                try (InputStream input = conn.getInputStream(); FileOutputStream file = new FileOutputStream(output)) {
+                    byte[] buffer = new byte[8192]; int count;
+                    while ((count = input.read(buffer)) != -1) file.write(buffer, 0, count);
+                }
+                main.post(() -> playVoice(output));
+            } catch (Exception e) {
+                if (output.exists()) output.delete();
+                main.post(() -> { if (voiceEnabled) status.setText("語音暫時無法播放"); });
+            }
+        }).start();
+    }
+
+    private void playVoice(File file) {
+        if (!voiceEnabled) { file.delete(); return; }
+        stopVoice();
+        try {
+            player = new MediaPlayer();
+            player.setDataSource(file.getAbsolutePath());
+            player.setOnPreparedListener(item -> { if (voiceEnabled) item.start(); else stopVoice(); });
+            player.setOnCompletionListener(item -> { stopVoice(); file.delete(); });
+            player.setOnErrorListener((item, what, extra) -> { stopVoice(); file.delete(); return true; });
+            player.prepareAsync();
+        } catch (Exception e) { file.delete(); stopVoice(); }
+    }
+
+    private void stopVoice() {
+        if (player == null) return;
+        try { if (player.isPlaying()) player.stop(); } catch (IllegalStateException ignored) { }
+        player.release(); player = null;
     }
 
     private GradientDrawable neonButton(boolean compact) {
@@ -294,7 +417,7 @@ public class MainActivity extends Activity {
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "請求失敗"));
                 JSONObject result = new JSONObject(raw.toString());
                 String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { showReply(screen); status.setText("貓雞·在線"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> handleReply(screen, speech));
             } catch (Exception e) {
                 main.post(() -> { showReply("連線失敗：" + e.getMessage()); status.setText("請檢查 Tailscale 和 Gateway"); setPetState(PetState.ERROR); });
             }
@@ -315,11 +438,11 @@ public class MainActivity extends Activity {
                 StringBuilder raw = new StringBuilder(); String line; while ((line = in.readLine()) != null) raw.append(line);
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "識別失敗"));
                 JSONObject result = new JSONObject(raw.toString()); String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { showReply(screen); status.setText("貓雞·在線"); talk.setEnabled(true); talk.setText("按住命令貓雞"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> { talk.setEnabled(true); talk.setText("按住命令貓雞"); handleReply(screen, speech); });
             } catch (Exception e) { main.post(() -> { showReply("語音請求失敗：" + e.getMessage()); status.setText("請再試一次"); talk.setEnabled(true); talk.setText("按住命令貓雞"); setPetState(PetState.ERROR); }); }
             finally { if (file != null) file.delete(); }
         }).start();
     }
     @Override public void onRequestPermissionsResult(int r, String[] p, int[] g) { super.onRequestPermissionsResult(r,p,g); }
-    @Override protected void onDestroy() { clearPetTimers(); releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() { clearPetTimers(); releaseRecorder(); stopVoice(); releaseBgm(); super.onDestroy(); }
 }

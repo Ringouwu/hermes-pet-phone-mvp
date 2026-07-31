@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -23,6 +24,7 @@ HERMES = os.environ.get(
 SESSION = os.environ.get("PET_HERMES_SESSION", "pet-desk-01")
 HOST = os.environ.get("PET_GATEWAY_HOST", "127.0.0.1")
 STT_MODEL = os.environ.get("PET_STT_MODEL", "base")
+TTS_VOICE = os.environ.get("PET_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
 MAX_SCREEN_CHARS = 180
 LOCK = threading.Lock()
 MODEL = None
@@ -49,6 +51,37 @@ def ask_hermes(text: str) -> str:
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout or "Hermes 調用失敗").strip())
     return compact_reply(completed.stdout)
+
+
+def synthesize_speech(text: str) -> bytes:
+    """Create one short, lightly retro-styled cat reply for the phone."""
+    with tempfile.TemporaryDirectory(prefix="maoji-tts-") as folder:
+        raw_path = Path(folder) / "raw.mp3"
+        final_path = Path(folder) / "maoji.mp3"
+        spoken = f"喵～。{text}。喵～"
+        tts = subprocess.run(
+            [
+                sys.executable, "-m", "edge_tts", "--voice", TTS_VOICE,
+                "--rate=-8%", "--text", spoken, "--write-media", str(raw_path),
+            ],
+            text=True, capture_output=True, timeout=60, check=False,
+        )
+        if tts.returncode != 0 or not raw_path.exists():
+            raise RuntimeError("語音合成暫時不可用")
+        effect = subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error", "-i", str(raw_path),
+                "-af", "aresample=12000,highpass=f=220,lowpass=f=3400,"
+                       "acrusher=bits=6:mode=lin:aa=1,"
+                       "aphaser=in_gain=0.65:out_gain=0.9:delay=4:decay=0.75:speed=0.5,"
+                       "aecho=0.8:0.55:70:0.20",
+                "-ar", "12000", "-b:a", "32k", str(final_path),
+            ],
+            text=True, capture_output=True, timeout=30, check=False,
+        )
+        if effect.returncode != 0 or not final_path.exists():
+            raise RuntimeError("語音效果處理失敗")
+        return final_path.read_bytes()
 
 
 def get_model():
@@ -99,6 +132,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_audio(self, data: bytes) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self) -> None:
         if self.path == "/health":
             self.send_json(HTTPStatus.OK, {"ok": True, "service": "pet-gateway"})
@@ -106,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:
-        if self.path not in ("/v1/chat", "/v1/audio", "/v1/warm"):
+        if self.path not in ("/v1/chat", "/v1/audio", "/v1/tts", "/v1/warm"):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         if not TOKEN or self.headers.get("Authorization") != f"Bearer {TOKEN}":
@@ -133,6 +174,11 @@ class Handler(BaseHTTPRequestHandler):
                 text = str(payload.get("text", "")).strip()
             if not text or len(text) > 500:
                 raise ValueError("text must contain 1-500 characters")
+            if self.path == "/v1/tts":
+                audio = synthesize_speech(text)
+                print(f"request: tts completed in {time.monotonic() - started:.1f}s", flush=True)
+                self.send_audio(audio)
+                return
             hermes_started = time.monotonic()
             answer = ask_hermes(text)
             print(f"request: hermes completed in {time.monotonic() - hermes_started:.1f}s; total {time.monotonic() - started:.1f}s", flush=True)

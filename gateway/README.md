@@ -8,7 +8,9 @@ The gateway invokes the separate Hermes session `pet-desk-01` from this director
 The gateway also uses `opencc-python-reimplemented` to convert every text reply to Traditional Chinese before returning it to the app:
 
 ```bash
-./venv/bin/pip install faster-whisper opencc-python-reimplemented
+./venv/bin/pip install faster-whisper opencc-python-reimplemented edge-tts
 ```
+
+`/v1/tts` uses Edge TTS with a Chinese female voice, then runs it through FFmpeg for a retro electronic effect. Install FFmpeg from the operating system package manager before enabling this endpoint.
 
 It normally listens only on `127.0.0.1:8787`; set `PET_GATEWAY_HOST` to the machine's Tailscale IP for the temporary direct private-HTTP MVP.
