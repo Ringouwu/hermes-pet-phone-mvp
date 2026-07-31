@@ -101,7 +101,7 @@ public class MainActivity extends Activity {
         dotShape.setShape(GradientDrawable.OVAL);
         dotShape.setColor(0xff4ee46c);
         dot.setBackground(dotShape);
-        status = text("🐱  猫鸡·在线", 18, 0xffffc46b);
+        status = text("🐱  貓雞·在線", 18, 0xffffc46b);
         status.setPadding(0, 0, 0, dp(8));
         LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(9), dp(9));
         dotParams.rightMargin = dp(10);
@@ -125,7 +125,7 @@ public class MainActivity extends Activity {
         liveBubble.setVisibility(View.VISIBLE);
         ScrollView replyScroll = new ScrollView(this);
         replyScroll.setVerticalScrollBarEnabled(false);
-        answer = text("喵～我在呢。\n有什么想聊的、想问的，\n或者需要我陪你一下吗？", 18, 0xffffe6cf);
+        answer = text("喵～我在呢。\n有什麼想聊的、想問的，\n或者需要我陪你一下嗎？", 18, 0xffffe6cf);
         answer.setGravity(Gravity.TOP | Gravity.START);
         answer.setLineSpacing(dp(9), 1.0f);
         answer.setPadding(0, 0, 0, 0);
@@ -145,7 +145,7 @@ public class MainActivity extends Activity {
         box.addView(pet, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL); actions.setPadding(0, dp(12), 0, 0);
-        talk = new Button(this); talk.setText("按住命令猫鸡"); talk.setTextSize(23); talk.setAllCaps(false);
+        talk = new Button(this); talk.setText("按住命令貓雞"); talk.setTextSize(23); talk.setAllCaps(false);
         talk.setTextColor(0xffffca70); applyPixelTypeface(talk); talk.setBackgroundResource(R.drawable.skin_main_button);
         actions.addView(talk, new LinearLayout.LayoutParams(0, dp(76), 1f));
         mute = new Button(this); mute.setText("🔊"); mute.setTextSize(24); mute.setAllCaps(false);
@@ -263,19 +263,19 @@ public class MainActivity extends Activity {
             recorder.setAudioEncodingBitRate(64000); recorder.setAudioSamplingRate(16000);
             recorder.setOutputFile(audioFile.getAbsolutePath());
             recorder.prepare(); recorder.start();
-            recording = true; talk.setText("松开发送"); status.setText("正在录音…"); showReply("我在听。"); setPetState(PetState.LISTENING);
-        } catch (Exception e) { status.setText("无法启动录音：" + e.getMessage()); releaseRecorder(); setPetState(PetState.ERROR); }
+            recording = true; talk.setText("鬆開發送"); status.setText("正在錄音…"); showReply("我在聽。"); setPetState(PetState.LISTENING);
+        } catch (Exception e) { status.setText("無法啟動錄音：" + e.getMessage()); releaseRecorder(); setPetState(PetState.ERROR); }
     }
     private void stopRecording() {
         if (!recording) return;
-        recording = false; talk.setText("发送中…"); talk.setEnabled(false); status.setText("正在上传并识别语音…"); setPetState(PetState.THINKING);
+        recording = false; talk.setText("發送中…"); talk.setEnabled(false); status.setText("正在上傳並識別語音…"); setPetState(PetState.THINKING);
         try { recorder.stop(); releaseRecorder(); sendAudio(audioFile); }
-        catch (RuntimeException e) { releaseRecorder(); talk.setEnabled(true); talk.setText("按住命令猫鸡"); status.setText("录音太短，请按住至少一秒"); setPetState(PetState.ERROR); }
+        catch (RuntimeException e) { releaseRecorder(); talk.setEnabled(true); talk.setText("按住命令貓雞"); status.setText("錄音太短，請按住至少一秒"); setPetState(PetState.ERROR); }
     }
     private void releaseRecorder() { if (recorder != null) { recorder.reset(); recorder.release(); recorder = null; } }
 
     private void send(String words) {
-        status.setText("猫鸡在思考…"); showReply(words); setPetState(PetState.THINKING);
+        status.setText("貓雞正在思考…"); showReply(words); setPetState(PetState.THINKING);
         new Thread(() -> {
             try {
                 URL url = new URL(BuildConfig.GATEWAY_URL + "/v1/chat");
@@ -291,12 +291,12 @@ public class MainActivity extends Activity {
                 BufferedReader in = new BufferedReader(new InputStreamReader(response < 400 ? conn.getInputStream() : conn.getErrorStream()));
                 StringBuilder raw = new StringBuilder(); String line;
                 while ((line = in.readLine()) != null) raw.append(line);
-                if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "请求失败"));
+                if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "請求失敗"));
                 JSONObject result = new JSONObject(raw.toString());
                 String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { showReply(screen); status.setText("猫鸡·在线"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> { showReply(screen); status.setText("貓雞·在線"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
             } catch (Exception e) {
-                main.post(() -> { showReply("连接失败：" + e.getMessage()); status.setText("请检查 Tailscale 和 Gateway"); setPetState(PetState.ERROR); });
+                main.post(() -> { showReply("連線失敗：" + e.getMessage()); status.setText("請檢查 Tailscale 和 Gateway"); setPetState(PetState.ERROR); });
             }
         }).start();
     }
@@ -313,10 +313,10 @@ public class MainActivity extends Activity {
                 }
                 int response = conn.getResponseCode(); BufferedReader in = new BufferedReader(new InputStreamReader(response < 400 ? conn.getInputStream() : conn.getErrorStream()));
                 StringBuilder raw = new StringBuilder(); String line; while ((line = in.readLine()) != null) raw.append(line);
-                if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "识别失败"));
+                if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "識別失敗"));
                 JSONObject result = new JSONObject(raw.toString()); String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { showReply(screen); status.setText("猫鸡·在线"); talk.setEnabled(true); talk.setText("按住命令猫鸡"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
-            } catch (Exception e) { main.post(() -> { showReply("语音请求失败：" + e.getMessage()); status.setText("请再试一次"); talk.setEnabled(true); talk.setText("按住命令猫鸡"); setPetState(PetState.ERROR); }); }
+                main.post(() -> { showReply(screen); status.setText("貓雞·在線"); talk.setEnabled(true); talk.setText("按住命令貓雞"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+            } catch (Exception e) { main.post(() -> { showReply("語音請求失敗：" + e.getMessage()); status.setText("請再試一次"); talk.setEnabled(true); talk.setText("按住命令貓雞"); setPetState(PetState.ERROR); }); }
             finally { if (file != null) file.delete(); }
         }).start();
     }

@@ -13,6 +13,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from opencc import OpenCC
+
 ROOT = Path(__file__).resolve().parent
 TOKEN = os.environ.get("PET_GATEWAY_TOKEN", "")
 HERMES = os.environ.get(
@@ -24,18 +26,20 @@ STT_MODEL = os.environ.get("PET_STT_MODEL", "base")
 MAX_SCREEN_CHARS = 180
 LOCK = threading.Lock()
 MODEL = None
+TRADITIONAL_CHINESE = OpenCC("s2t")
 
 
 def compact_reply(value: str) -> str:
-    value = " ".join(value.strip().split())
+    value = TRADITIONAL_CHINESE.convert(" ".join(value.strip().split()))
     if len(value) > MAX_SCREEN_CHARS:
         value = value[: MAX_SCREEN_CHARS - 1].rstrip() + "…"
-    return value or "我刚才没有收到有效回答，再说一次试试。"
+    return value or "我剛才沒有收到有效回答，再說一次試試。"
 
 
 def ask_hermes(text: str) -> str:
     command = [
         HERMES, "chat", "--quiet", "--source", "pet", "--continue", SESSION,
+        "--no-restore-cwd",
         "--max-turns", "4", "--query", text,
     ]
     with LOCK:
@@ -43,7 +47,7 @@ def ask_hermes(text: str) -> str:
             command, cwd=ROOT, text=True, capture_output=True, timeout=240, check=False
         )
     if completed.returncode != 0:
-        raise RuntimeError((completed.stderr or completed.stdout or "Hermes 调用失败").strip())
+        raise RuntimeError((completed.stderr or completed.stdout or "Hermes 調用失敗").strip())
     return compact_reply(completed.stdout)
 
 
@@ -76,7 +80,7 @@ def transcribe_audio(audio: bytes) -> str:
         )
         text = "".join(segment.text for segment in segments).strip()
     if not text:
-        raise ValueError("没有识别到有效语音")
+        raise ValueError("沒有識別到有效語音")
     return text
 
 
@@ -136,10 +140,10 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except subprocess.TimeoutExpired:
-            self.send_json(HTTPStatus.GATEWAY_TIMEOUT, {"error": "Hermes 响应超时"})
+            self.send_json(HTTPStatus.GATEWAY_TIMEOUT, {"error": "Hermes 回應逾時"})
         except Exception as exc:
             print(f"gateway error: {exc}", flush=True)
-            self.send_json(HTTPStatus.BAD_GATEWAY, {"error": "Hermes 暂时不可用"})
+            self.send_json(HTTPStatus.BAD_GATEWAY, {"error": "Hermes 暫時不可用"})
 
 
 if __name__ == "__main__":
