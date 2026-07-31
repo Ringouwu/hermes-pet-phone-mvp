@@ -13,7 +13,7 @@ android {
         targetSdk 35
         versionCode 1
         versionName '0.1.0'
-        buildConfigField 'String', 'GATEWAY_URL', '"' + petProps.getProperty('gatewayUrl', 'http://127.0.0.1:8787') + '"'
+        buildConfigField 'String', 'GATEWAY_URL', '"' + petProps.getProperty('gatewayUrl', 'http://100.110.86.0:8787') + '"'
         buildConfigField 'String', 'GATEWAY_TOKEN', '"' + petProps.getProperty('gatewayToken', '') + '"'
     }
     buildFeatures { buildConfig true }

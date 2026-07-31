@@ -3,7 +3,9 @@ package com.yangshuo.petphone;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
-import android.graphics.Movie;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -13,6 +15,8 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -26,9 +30,6 @@ import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.ArrayList;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.Locale;
 import java.util.Random;
 
@@ -37,7 +38,10 @@ public class MainActivity extends Activity {
     private enum PetState { IDLE, LISTENING, THINKING, ANSWERING, ERROR }
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random random = new Random();
+    private Typeface pixelTypeface;
     private TextView status, answer;
+    private FrameLayout liveBubble;
+    private ImageView welcomeBubble;
     private Button talk, mute;
     private GifView pet;
     private TextToSpeech tts;
@@ -45,19 +49,10 @@ public class MainActivity extends Activity {
     private MediaRecorder recorder;
     private File audioFile;
     private boolean recording = false;
-    private TextView clock, calendar;
     private PetState petState = PetState.IDLE;
     private int currentGif = 0;
     private final int[] idleGifs = {R.raw.idle, R.raw.idle, R.raw.jumping, R.raw.running_left, R.raw.running_right};
     private final int[] thinkingGifs = {R.raw.waiting, R.raw.review, R.raw.running};
-    private final Runnable clockTicker = new Runnable() {
-        @Override public void run() {
-            Date now = new Date();
-            if (clock != null) clock.setText(new SimpleDateFormat("HH:mm", Locale.CHINA).format(now));
-            if (calendar != null) calendar.setText(new SimpleDateFormat("M月d日  EEEE", Locale.CHINA).format(now));
-            main.postDelayed(this, 1000);
-        }
-    };
     private final Runnable idleTicker = new Runnable() {
         @Override public void run() {
             if (petState != PetState.IDLE) return;
@@ -75,8 +70,10 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        // zpix does not contain the full Chinese glyph set on Android; use the system mono fallback
+        // so dynamic Hermes replies always remain readable.
+        pixelTypeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL);
         setContentView(makeUi());
-        clockTicker.run();
         setPetState(PetState.IDLE);
         tts = new TextToSpeech(this, code -> main.post(() -> { if (tts != null) tts.setLanguage(Locale.SIMPLIFIED_CHINESE); }));
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -85,50 +82,73 @@ public class MainActivity extends Activity {
     }
 
     private View makeUi() {
+        FrameLayout root = new FrameLayout(this);
+        ImageView background = new ImageView(this);
+        background.setImageResource(R.drawable.neon_magic_room);
+        background.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        root.addView(background, new FrameLayout.LayoutParams(-1, -1));
+
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(20), dp(14), dp(20), dp(18));
-        box.setBackgroundColor(0xff15110d);
+        box.setPadding(dp(20), dp(8), dp(20), dp(18));
+        root.addView(box, new FrameLayout.LayoutParams(-1, -1));
 
-        status = text("猫鸡·在线", 21, 0xffd7b785);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        View dot = new View(this);
+        GradientDrawable dotShape = new GradientDrawable();
+        dotShape.setShape(GradientDrawable.OVAL);
+        dotShape.setColor(0xff4ee46c);
+        dot.setBackground(dotShape);
+        status = text("🐱  猫鸡·在线", 20, 0xffffc46b);
         status.setPadding(0, 0, 0, dp(8));
-        box.addView(status, new LinearLayout.LayoutParams(-1, dp(40)));
+        LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(9), dp(9));
+        dotParams.rightMargin = dp(10);
+        header.addView(dot, dotParams);
+        header.addView(status, new LinearLayout.LayoutParams(-2, dp(40)));
+        box.addView(header, new LinearLayout.LayoutParams(-1, dp(42)));
 
-        LinearLayout dashboard = new LinearLayout(this);
-        dashboard.setOrientation(LinearLayout.HORIZONTAL);
-        dashboard.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout info = new LinearLayout(this);
-        info.setOrientation(LinearLayout.VERTICAL);
-        info.setGravity(Gravity.CENTER_VERTICAL);
-        TextView nowLabel = text("现在", 15, 0xffa69886);
-        clock = text("--:--", 46, 0xfff5eee3);
-        calendar = text("加载日期…", 17, 0xffd7b785);
-        TextView hint = text("按住说话\n松开就发送", 15, 0xffa69886);
-        hint.setPadding(0, dp(18), 0, 0);
-        info.addView(nowLabel);
-        info.addView(clock);
-        info.addView(calendar);
-        info.addView(hint);
-        dashboard.addView(info, new LinearLayout.LayoutParams(0, -1, 0.78f));
-        pet = new GifView(this, R.raw.idle);
-        pet.setOnClickListener(v -> reactToPetTap());
-        dashboard.addView(pet, new LinearLayout.LayoutParams(0, -1, 1.22f));
-        box.addView(dashboard, new LinearLayout.LayoutParams(-1, 0, 1f));
+        // The bubble is traced directly from the selected final reference, including
+        // its lower, right-of-centre tail. Text remains an independent live layer.
+        FrameLayout bubbleStage = new FrameLayout(this);
+        welcomeBubble = new ImageView(this);
+        welcomeBubble.setImageResource(R.drawable.skin_bubble_reference_initial);
+        welcomeBubble.setScaleType(ImageView.ScaleType.FIT_XY);
+        bubbleStage.addView(welcomeBubble, new FrameLayout.LayoutParams(-1, -1));
 
-        TextView replyLabel = text("猫鸡说", 16, 0xffd7b785);
-        replyLabel.setPadding(0, dp(6), 0, 0);
-        box.addView(replyLabel, new LinearLayout.LayoutParams(-1, dp(32)));
+        liveBubble = new FrameLayout(this);
+        liveBubble.setBackgroundResource(R.drawable.skin_bubble_final_reference);
+        liveBubble.setVisibility(View.INVISIBLE);
         ScrollView replyScroll = new ScrollView(this);
-        answer = text("按住下方按钮，说一句话。", 22, 0xfff5eee3);
+        replyScroll.setVerticalScrollBarEnabled(false);
+        answer = text("喵～我在呢。\n有什么想聊的、想问的，\n或者需要我陪你一下吗？", 20, 0xffffe6cf);
         answer.setGravity(Gravity.TOP | Gravity.START);
-        answer.setLineSpacing(dp(4), 1.05f);
-        answer.setPadding(dp(2), dp(6), dp(2), dp(6));
+        answer.setLineSpacing(dp(9), 1.0f);
+        answer.setPadding(0, 0, 0, 0);
         replyScroll.addView(answer, new ScrollView.LayoutParams(-1, -2));
-        box.addView(replyScroll, new LinearLayout.LayoutParams(-1, dp(180)));
+        FrameLayout.LayoutParams replyParams = new FrameLayout.LayoutParams(-1, -1);
+        replyParams.setMargins(dp(50), dp(46), dp(40), dp(78));
+        liveBubble.addView(replyScroll, replyParams);
+        // Matches the selected reference's 1484 x 1131 composition.
+        LinearLayout.LayoutParams bubbleParams = new LinearLayout.LayoutParams(-1, dp(220));
+        bubbleParams.topMargin = dp(1);
+        bubbleStage.addView(liveBubble, new FrameLayout.LayoutParams(-1, -1));
+        box.addView(bubbleStage, bubbleParams);
+
+        pet = new GifView(this, R.raw.idle);
+        pet.setTranslationY(-dp(24));
+        pet.setOnClickListener(v -> reactToPetTap());
+        box.addView(pet, new LinearLayout.LayoutParams(-1, 0, 1f));
+
         LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL); actions.setPadding(0, dp(12), 0, 0);
-        talk = new Button(this); talk.setText("按住说话"); talk.setTextSize(23); talk.setAllCaps(false);
+        talk = new Button(this); talk.setText("按住命令猫鸡"); talk.setTextSize(22); talk.setAllCaps(false);
+        talk.setTextColor(0xffffca70); talk.setTypeface(pixelTypeface); talk.setBackgroundResource(R.drawable.skin_main_button);
         actions.addView(talk, new LinearLayout.LayoutParams(0, dp(76), 1f));
         mute = new Button(this); mute.setText("🔊"); mute.setTextSize(24); mute.setAllCaps(false);
+        mute.setText(""); mute.setGravity(Gravity.CENTER); mute.setTextColor(0xffffca70); mute.setTypeface(pixelTypeface); mute.setBackgroundResource(R.drawable.skin_mute_button);
+        Drawable speaker = getDrawable(R.drawable.skin_speaker);
+        speaker.setBounds(0, 0, dp(42), dp(42));
+        mute.setCompoundDrawables(null, speaker, null, null);
         LinearLayout.LayoutParams muteParams = new LinearLayout.LayoutParams(dp(76), dp(76));
         muteParams.leftMargin = dp(10); actions.addView(mute, muteParams);
         box.addView(actions);
@@ -138,12 +158,27 @@ public class MainActivity extends Activity {
             return true;
         });
         mute.setOnClickListener(v -> { muted = !muted; mute.setText(muted ? "🔇" : "🔊"); if (muted) tts.stop(); });
-        return box;
+        return root;
     }
 
     private TextView text(String value, int size, int color) {
         TextView view = new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(color);
+        if (pixelTypeface != null) view.setTypeface(pixelTypeface);
         view.setPadding(0, 8, 0, 8); return view;
+    }
+
+    private void showReply(String value) {
+        if (welcomeBubble != null) welcomeBubble.setVisibility(View.GONE);
+        if (liveBubble != null) liveBubble.setVisibility(View.VISIBLE);
+        answer.setText(value);
+    }
+
+    private GradientDrawable neonButton(boolean compact) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(0xd9251722);
+        drawable.setCornerRadius(dp(compact ? 24 : 30));
+        drawable.setStroke(dp(2), 0xffffb34f);
+        return drawable;
     }
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
@@ -218,19 +253,19 @@ public class MainActivity extends Activity {
             recorder.setAudioEncodingBitRate(64000); recorder.setAudioSamplingRate(16000);
             recorder.setOutputFile(audioFile.getAbsolutePath());
             recorder.prepare(); recorder.start();
-            recording = true; talk.setText("松开发送"); status.setText("正在录音…"); answer.setText("我在听。"); setPetState(PetState.LISTENING);
+            recording = true; talk.setText("松开发送"); status.setText("正在录音…"); showReply("我在听。"); setPetState(PetState.LISTENING);
         } catch (Exception e) { status.setText("无法启动录音：" + e.getMessage()); releaseRecorder(); setPetState(PetState.ERROR); }
     }
     private void stopRecording() {
         if (!recording) return;
         recording = false; talk.setText("发送中…"); talk.setEnabled(false); status.setText("正在上传并识别语音…"); setPetState(PetState.THINKING);
         try { recorder.stop(); releaseRecorder(); sendAudio(audioFile); }
-        catch (RuntimeException e) { releaseRecorder(); talk.setEnabled(true); talk.setText("按住说话"); status.setText("录音太短，请按住至少一秒"); setPetState(PetState.ERROR); }
+        catch (RuntimeException e) { releaseRecorder(); talk.setEnabled(true); talk.setText("按住命令猫鸡"); status.setText("录音太短，请按住至少一秒"); setPetState(PetState.ERROR); }
     }
     private void releaseRecorder() { if (recorder != null) { recorder.reset(); recorder.release(); recorder = null; } }
 
     private void send(String words) {
-        status.setText("猫鸡在思考…"); answer.setText(words); setPetState(PetState.THINKING);
+        status.setText("猫鸡在思考…"); showReply(words); setPetState(PetState.THINKING);
         new Thread(() -> {
             try {
                 URL url = new URL(BuildConfig.GATEWAY_URL + "/v1/chat");
@@ -249,9 +284,9 @@ public class MainActivity extends Activity {
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "请求失败"));
                 JSONObject result = new JSONObject(raw.toString());
                 String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+                main.post(() -> { showReply(screen); status.setText("猫鸡·在线"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
             } catch (Exception e) {
-                main.post(() -> { answer.setText("连接失败：" + e.getMessage()); status.setText("请检查 Tailscale 和 Gateway"); setPetState(PetState.ERROR); });
+                main.post(() -> { showReply("连接失败：" + e.getMessage()); status.setText("请检查 Tailscale 和 Gateway"); setPetState(PetState.ERROR); });
             }
         }).start();
     }
@@ -270,11 +305,11 @@ public class MainActivity extends Activity {
                 StringBuilder raw = new StringBuilder(); String line; while ((line = in.readLine()) != null) raw.append(line);
                 if (response >= 400) throw new Exception(new JSONObject(raw.toString()).optString("error", "识别失败"));
                 JSONObject result = new JSONObject(raw.toString()); String screen = result.getString("screen"); String speech = result.optString("speech", screen);
-                main.post(() -> { answer.setText(screen); status.setText("猫鸡·在线"); talk.setEnabled(true); talk.setText("按住说话"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
-            } catch (Exception e) { main.post(() -> { answer.setText("语音请求失败：" + e.getMessage()); status.setText("请再试一次"); talk.setEnabled(true); talk.setText("按住说话"); setPetState(PetState.ERROR); }); }
+                main.post(() -> { showReply(screen); status.setText("猫鸡·在线"); talk.setEnabled(true); talk.setText("按住命令猫鸡"); setPetState(PetState.ANSWERING); if (!muted) tts.speak(speech, TextToSpeech.QUEUE_FLUSH, null, "pet-answer"); });
+            } catch (Exception e) { main.post(() -> { showReply("语音请求失败：" + e.getMessage()); status.setText("请再试一次"); talk.setEnabled(true); talk.setText("按住命令猫鸡"); setPetState(PetState.ERROR); }); }
             finally { if (file != null) file.delete(); }
         }).start();
     }
     @Override public void onRequestPermissionsResult(int r, String[] p, int[] g) { super.onRequestPermissionsResult(r,p,g); }
-    @Override protected void onDestroy() { main.removeCallbacks(clockTicker); clearPetTimers(); releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() { clearPetTimers(); releaseRecorder(); if (tts != null) tts.shutdown(); super.onDestroy(); }
 }

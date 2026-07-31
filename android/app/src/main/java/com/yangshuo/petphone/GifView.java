@@ -19,7 +19,7 @@ public class GifView extends View {
         super.onDraw(c); if (movie == null) return;
         int duration = movie.duration() == 0 ? 1000 : movie.duration();
         movie.setTime((int)((SystemClock.uptimeMillis() - started) % duration));
-        float scale = Math.min(getWidth() / (float) movie.width(), getHeight() / (float) movie.height()) * .8f;
+        float scale = Math.min(getWidth() / (float) movie.width(), getHeight() / (float) movie.height()) * .96f;
         c.save(); c.translate((getWidth()-movie.width()*scale)/2, (getHeight()-movie.height()*scale)/2); c.scale(scale, scale); movie.draw(c,0,0); c.restore();
         postInvalidateOnAnimation();
     }
