@@ -1,26 +1,30 @@
-# Hermes 桌面宠物：Android 手机 MVP
+# 猫鸡：Android 手机宠物 MVP
 
-这是“桌面宠物”硬件终端前的最小可用验证版本：Android 手机充当屏幕、麦克风、按住说话按钮与扬声器；家里的 Linux 服务器负责语音识别和 Hermes 对话。手机只通过 Tailscale 私网访问服务器，不依赖电脑一直开着。
+这是实体桌面宠物之前的个人单设备 MVP。Android 手机充当屏幕、麦克风、扬声器与控制面板；Linux 服务器负责本地语音识别、Hermes 对话、繁简转换和服务器端语音合成。手机通过 Tailscale 私网访问服务器，不依赖电脑一直开着。
 
-## 现在能做什么
+## 当前已经实现
 
-- 按住底部按钮录音，松开后把短语音发给服务器。
-- 服务器识别中文语音，交给专用 Hermes 会话处理，再返回正常但偏短、最长 180 个字符的宠物回答。
-- 手机展示回答，并尝试用 Android 系统 TTS 朗读。
-- 宠物有待机与等待两种 GIF 动画。
-- 宠物拥有高频但轻量的状态动画：待机会随机小动作，录音、思考、回答、失败和点击宠物都会立即反馈。
-- 网关只监听 Tailscale IP，接口还需要独立 Bearer Token；录音仅临时落盘，识别后立即删除。
+- 按住「按住命令猫鸡」录音，松开后上传 M4A 录音。
+- 服务器用本地 `faster-whisper base` 模型识别中文，再交给独立 Hermes 会话 `pet-desk-01`。
+- 猫鸡人格由 `gateway/SOUL.md` 控制；网关每次恢复会话时使用 `--no-restore-cwd`，确保该人格文件会被加载。
+- Hermes 回复先被网关截断为最多 180 个字符，并用 OpenCC 转成繁體中文，再显示到手机气泡。
+- 右下角喇叭默认关闭；打开后，手机请求 Gateway 的 `/v1/tts`，播放服务器生成的 MP3，而不是 Android 系统 TTS。
+- `/v1/tts` 使用在线 Edge TTS 的中文女声，再由 FFmpeg 加入低采样率、颗粒、移相和回声，形成可听清的复古电子音；音频前后各有一声「喵～」。
+- 喇叭上方的音乐按钮控制内置的 chiptune 背景音乐。音乐循环播放；关闭时暂停并记录本次 App 运行期间的进度，重新打开从该位置继续。彻底关闭 App 后会从头开始。
+- 宠物会按待机、录音、思考、回答、失败与点击状态切换 GIF 动画。
+- Gateway 使用 Tailscale 私网地址和独立 Bearer Token；服务器录音与临时 TTS 文件都会在处理后删除。
 
-## 组件怎么分工
+## 组件分工
 
-| 部分 | 谁负责 | 做法 |
+| 部分 | 谁负责 | 当前做法 |
 | --- | --- | --- |
-| 录音、按住说话、画面 | Android 应用 | `MediaRecorder` 录制 M4A；`GifView` 播放 GIF；`MainActivity` 发起 HTTP 请求。 |
-| 私网连接 | Tailscale | Android 与 Linux 服务器加入同一 Tailnet，应用直接访问服务器的 Tailscale IP。 |
-| STT（语音转文字） | Linux 服务器 | `faster-whisper` 的本地 `base` 多语言模型，以 CPU int8 运行，指定中文识别；不调用云端 STT。 |
-| 对话、待办和工具任务 | Hermes Agent | 网关以独立会话 `pet-desk-01` 调用 Hermes；其 `SOUL.md` 约束宠物身份、简短回复和可代办任务。 |
-| 回答长度 | 网关 + SOUL | `SOUL.md` 要求正常但偏短的回答，网关再硬性截断为 180 字；手机回复框可手动滚动查看。 |
-| 朗读（TTS） | 当前为 Android 系统 | 手机上的系统 Text-to-Speech 服务朗读返回文字。未来实体宠物可改为服务器 TTS 或 ESP32-S3 音频模块。 |
+| 录音、按住说话、画面与播放 | Android 应用 | `MediaRecorder` 录制 M4A；`GifView` 播放宠物动画；`MediaPlayer` 播放 Gateway TTS 和内置背景音乐。 |
+| 私网连接 | Tailscale | Android 与 Linux 服务器在同一 Tailnet；App 直接访问服务器的 Tailscale IP。 |
+| STT（语音转文字） | Linux 服务器 | `faster-whisper` 的本地 `base` 多语言模型，CPU int8，指定中文识别；不调用云端 STT。 |
+| 对话、待办和工具任务 | Hermes Agent | Gateway 以独立会话 `pet-desk-01` 调用 Hermes；`SOUL.md` 规定猫鸡人格、繁體中文和短回复。 |
+| 繁體输出 | Linux 服务器 | `opencc-python-reimplemented` 将 Gateway 返回给手机的对话文字转为繁體。 |
+| 朗读（TTS） | Linux 服务器 + Android 播放 | Gateway 调用 Edge TTS 和 FFmpeg，返回 MP3；Android 只下载并播放，不使用系统 Text-to-Speech。 |
+| 背景音乐 | Android 应用 | 内置 `chiptune_bgm.mp3`，单声道 22.05kHz / 48kbps，循环播放；本次运行内支持断点续播。 |
 
 ## 宠物动画状态
 
@@ -34,36 +38,39 @@
 ## 目录
 
 ```text
-android/     Android Studio 原生 Java 应用
-gateway/     Linux 上常驻的 Python 网关与 systemd 用户服务
+android/     Android Studio 原生 Java 应用、宠物素材、图标与背景音乐
+gateway/     Linux 上常驻的 Python 网关、猫鸡 SOUL 和 systemd 用户服务
 ```
 
 ## 本地配置与安全
 
-仓库不包含任何密钥、实际 Tailscale 地址、录音、APK、模型或 Gradle 构建输出。
+仓库不包含任何密钥、实际 Tailscale 地址、录音、生成的回复音频、APK、STT 模型或 Gradle 构建输出。
 
 复制 `android/pet.properties.example` 为 `android/pet.properties`，填入私网网关地址和设备 Token。这个文件已被忽略，不能提交。
 
-Linux 服务器把 Token 放在 `gateway/.env`，其内容至少包括：
+Linux 服务器的 `gateway/.env` 至少包括：
 
 ```ini
 PET_GATEWAY_TOKEN=请生成一段长随机字符串
 PET_GATEWAY_HOST=服务器的Tailscale_IP
 PET_HERMES_SESSION=pet-desk-01
+# 可选；默认是 zh-CN-XiaoxiaoNeural
+PET_TTS_VOICE=zh-CN-XiaoxiaoNeural
 ```
 
-`gateway/pet-gateway.service` 是 systemd 用户服务模板。先在服务器建立 Python 虚拟环境、安装 `faster-whisper`，并确认 Hermes 命令可用，再安装与启动该服务。
+服务器需要 Python 虚拟环境、`faster-whisper`、`opencc-python-reimplemented`、`edge-tts`、FFmpeg，以及可用的 Hermes 命令。详见 [gateway/README.md](gateway/README.md)。
 
 ## 运行与验证顺序
 
-1. 服务器安装 `faster-whisper`，部署 `gateway/`，配置 `.env` 与 systemd 服务。
-2. 用 `POST /v1/warm` 预热本地 STT 模型；这样用户的第一次语音不必等待模型加载。
+1. 服务器部署 `gateway/`，配置 `.env` 和 systemd 用户服务，并安装 Gateway 依赖与 FFmpeg。
+2. 用 `POST /v1/warm` 预热本地 STT 模型；第一次语音不必等待模型加载。
 3. Android Studio 打开 `android/`，创建本地 `pet.properties`，连接手机后安装 debug 包。
-4. 在手机按住说话、松开，等待“上传并识别语音”完成；服务器日志会记录 STT、Hermes 和总耗时。
+4. 在手机按住说话、松开，确认繁體文字回复出现；打开喇叭后确认服务器 TTS 播放；点击音乐按钮确认背景音乐循环和断点续播。
 
 ## 当前边界
 
-- 这是个人单设备 MVP，不是多用户服务；网关只适合一位用户串行使用。
-- 语音识别和 Hermes 请求是同步的，复杂任务可能需要较久；手机当前最多等待 6 分钟。
-- Android TTS 是否可用取决于手机是否装有可用的中文语音引擎；不影响服务器端 STT 与文字显示。
-- 未来换成 ESP32-S3 屏幕宠物时，可保留网关、Tailscale、STT 和 Hermes，替换 Android 客户端即可。
+- 这是个人单设备 MVP，不是多用户服务；Gateway 以锁串行处理 STT 与 Hermes 请求。
+- 语音识别和 Hermes 请求是同步的，复杂任务可能较久；App 的对话请求最长等待 6 分钟，TTS 请求最长等待 90 秒。
+- Edge TTS 是在线服务：服务器需要能够访问它。它适合个人原型，不应视为具备正式服务等级保证的生产 TTS。
+- 静音只关闭猫鸡回复音频，不影响录音、语音识别和文字回复；背景音乐与喇叭开关互相独立。
+- 未来替换成 ESP32-S3 或其他实体终端时，可保留 Gateway、Tailscale、STT、Hermes 和 `/v1/tts`，替换 Android 客户端即可。
