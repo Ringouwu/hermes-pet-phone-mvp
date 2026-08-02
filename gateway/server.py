@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import base64
+import datetime as dt
+import hashlib
+import hmac
 import json
 import os
 import subprocess
@@ -10,6 +14,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,8 +30,14 @@ HERMES = os.environ.get(
 SESSION = os.environ.get("PET_HERMES_SESSION", "pet-desk-01")
 HOST = os.environ.get("PET_GATEWAY_HOST", "127.0.0.1")
 STT_MODEL = os.environ.get("PET_STT_MODEL", "base")
+STT_PROVIDER = os.environ.get("PET_STT_PROVIDER", "local").strip().lower()
+STT_FALLBACK = os.environ.get("PET_STT_FALLBACK", "local").strip().lower()
+TENCENT_SECRET_ID = os.environ.get("TENCENT_SECRET_ID", "")
+TENCENT_SECRET_KEY = os.environ.get("TENCENT_SECRET_KEY", "")
+TENCENT_ASR_ENGINE = os.environ.get("TENCENT_ASR_ENGINE", "16k_zh")
 TTS_VOICE = os.environ.get("PET_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
 MAX_SCREEN_CHARS = 180
+MAX_TENCENT_AUDIO_BYTES = 2 * 1024 * 1024
 LOCK = threading.Lock()
 MODEL = None
 TRADITIONAL_CHINESE = OpenCC("s2t")
@@ -103,7 +115,7 @@ def get_model():
     return MODEL
 
 
-def transcribe_audio(audio: bytes) -> str:
+def transcribe_audio_locally(audio: bytes) -> str:
     """Transcribe one short phone recording locally; audio is deleted immediately."""
     with tempfile.NamedTemporaryFile(suffix=".m4a", delete=True) as handle:
         handle.write(audio)
@@ -115,6 +127,139 @@ def transcribe_audio(audio: bytes) -> str:
     if not text:
         raise ValueError("沒有識別到有效語音")
     return text
+
+
+def _hmac_sha256(key: bytes, message: str) -> bytes:
+    return hmac.new(key, message.encode("utf-8"), hashlib.sha256).digest()
+
+
+def transcribe_audio_with_tencent(audio: bytes) -> str:
+    """Send one short M4A recording to Tencent Cloud SentenceRecognition.
+
+    Credentials deliberately come only from the private service environment; the
+    Android client receives neither the SecretId nor the SecretKey.
+    """
+    if not TENCENT_SECRET_ID or not TENCENT_SECRET_KEY:
+        raise RuntimeError("Tencent Cloud STT credentials are not configured")
+    if len(audio) > MAX_TENCENT_AUDIO_BYTES:
+        raise ValueError("語音太長，請控制在 60 秒內再試一次")
+
+    payload = json.dumps(
+        {
+            "ProjectId": 0,
+            "SubServiceType": 2,
+            "EngSerViceType": TENCENT_ASR_ENGINE,
+            "SourceType": 1,
+            "VoiceFormat": "m4a",
+            "Data": base64.b64encode(audio).decode("ascii"),
+            "DataLen": len(audio),
+            "FilterDirty": 0,
+            "FilterModal": 0,
+            "FilterPunc": 0,
+            "ConvertNumMode": 1,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    host = "asr.tencentcloudapi.com"
+    service = "asr"
+    action = "SentenceRecognition"
+    version = "2019-06-14"
+    timestamp = int(time.time())
+    date = dt.datetime.fromtimestamp(timestamp, tz=dt.timezone.utc).strftime("%Y-%m-%d")
+    content_type = "application/json; charset=utf-8"
+    canonical_headers = f"content-type:{content_type}\nhost:{host}\n"
+    signed_headers = "content-type;host"
+    canonical_request = "\n".join(
+        [
+            "POST",
+            "/",
+            "",
+            canonical_headers,
+            signed_headers,
+            hashlib.sha256(payload).hexdigest(),
+        ]
+    )
+    credential_scope = f"{date}/{service}/tc3_request"
+    string_to_sign = "\n".join(
+        [
+            "TC3-HMAC-SHA256",
+            str(timestamp),
+            credential_scope,
+            hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+        ]
+    )
+    secret_date = _hmac_sha256(("TC3" + TENCENT_SECRET_KEY).encode("utf-8"), date)
+    secret_service = _hmac_sha256(secret_date, service)
+    secret_signing = _hmac_sha256(secret_service, "tc3_request")
+    signature = hmac.new(secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    authorization = (
+        "TC3-HMAC-SHA256 "
+        f"Credential={TENCENT_SECRET_ID}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+    request = urllib.request.Request(
+        f"https://{host}",
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": content_type,
+            "Host": host,
+            "Authorization": authorization,
+            "X-TC-Action": action,
+            "X-TC-Version": version,
+            "X-TC-Timestamp": str(timestamp),
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"Tencent Cloud STT request failed: HTTP {exc.code} {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Tencent Cloud STT network error: {exc.reason}") from exc
+
+    response = result.get("Response", {})
+    if response.get("Error"):
+        error = response["Error"]
+        raise RuntimeError(
+            "Tencent Cloud STT failed: "
+            f"{error.get('Code', 'Unknown')} {error.get('Message', '')}"
+        )
+    text = str(response.get("Result", "")).strip()
+    if not text:
+        raise ValueError("沒有識別到有效語音")
+    print(
+        "stt: Tencent Cloud succeeded "
+        f"request_id={response.get('RequestId', 'unknown')} "
+        f"audio_duration_ms={response.get('AudioDuration', 'unknown')}",
+        flush=True,
+    )
+    return text
+
+
+def transcribe_audio(audio: bytes) -> str:
+    if STT_PROVIDER == "tencent":
+        try:
+            return transcribe_audio_with_tencent(audio)
+        except ValueError:
+            raise
+        except Exception as exc:
+            if STT_FALLBACK != "local":
+                raise
+            print(f"stt: Tencent Cloud failed ({exc}); falling back to local model", flush=True)
+    return transcribe_audio_locally(audio)
+
+
+def warm_stt() -> str:
+    if STT_PROVIDER == "tencent":
+        if not TENCENT_SECRET_ID or not TENCENT_SECRET_KEY:
+            raise RuntimeError("Tencent Cloud STT credentials are not configured")
+        return "tencent-configured"
+    get_model()
+    return "local-ready"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -157,8 +302,8 @@ class Handler(BaseHTTPRequestHandler):
             started = time.monotonic()
             if self.path == "/v1/warm":
                 with LOCK:
-                    get_model()
-                self.send_json(HTTPStatus.OK, {"ok": True, "stt": "ready"})
+                    status = warm_stt()
+                self.send_json(HTTPStatus.OK, {"ok": True, "stt": status, "provider": STT_PROVIDER})
                 return
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 5 * 1024 * 1024:
